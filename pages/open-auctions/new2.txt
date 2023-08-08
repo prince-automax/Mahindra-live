@@ -1,0 +1,686 @@
+import DashboardTemplate from "../../components/templates/DashboardTemplate";
+import withPrivateRoute from "../../utils/withPrivateRoute";
+import Image from "next/image";
+
+import {
+    useVehiclesQuery,
+    VehiclesQuery,
+    useCreateBidMutation,
+    CreateBidMutationVariables,
+    QueryQueryVariables,
+    useQueryQuery,
+} from "@utils/graphql";
+import graphQLClient from "@utils/useGQLQuery";
+import moment from "moment";
+import { useRouter } from "next/router";
+import { useEffect, useState } from "react";
+import { Tab } from "@headlessui/react";
+import { CubeIcon } from "@heroicons/react/outline";
+
+const bidHistory = [
+    {
+        name: "James Bond",
+        amount: 23000,
+    },
+    {
+        name: "Elon Musk",
+        amount: 200000,
+    },
+    {
+        name: "Bill Gates",
+        amount: 50000,
+    },
+    {
+        name: "Tim Cook",
+        amount: 40000,
+    },
+];
+
+const incrementAmounts = [
+    {
+        id: 1,
+        label: "1,000",
+        value: 1000,
+    },
+    {
+        id: 2,
+        label: "2,000",
+        value: 2000,
+    },
+    {
+        id: 3,
+        label: "5,000",
+        value: 5000,
+    },
+    {
+        id: 4,
+        label: "10,000",
+        value: 10000,
+    },
+    {
+        id: 5,
+        label: "25,000",
+        value: 25000,
+    },
+];
+
+function classNames(...classes) {
+    return classes.filter(Boolean).join(" ");
+}
+
+function OpenAuctions() {
+    const router = useRouter();
+    const { id } = router.query;
+    const [accessToken, setAccessToken] = useState("");
+    const [rInterval, setRInterval] = useState(5000);
+    const [liveItem, setLiveItem] = useState(null);
+    const [bidAmount, setBidAmount] = useState("");
+    const [tick, setTick] = useState(0);
+    const [serverTime, setserverTime] = useState(null);
+
+    useEffect(() => {
+        if (typeof window !== "undefined") {
+            const token = localStorage.getItem("token");
+            const id = localStorage.getItem("id");
+            setAccessToken(token);
+        }
+    }, []);
+
+    useEffect(() => {
+        const timer = setInterval(() => {
+            setTick((tic) => tic + 1);
+        }, 1000);
+        return () => clearInterval(timer);
+    }, []);
+
+    const { data: timeData } = useQueryQuery<QueryQueryVariables>(
+        graphQLClient(),
+        {},
+        { refetchInterval: 60000 }
+    );
+
+    useEffect(() => {
+        if (timeData && timeData.time) {
+            setTick(0);
+            setserverTime(timeData.time);
+        }
+    }, [timeData]);
+
+    const { data, isLoading } = useVehiclesQuery<VehiclesQuery>(
+        graphQLClient({ Authorization: `Bearer ${accessToken}` }),
+        {
+            where: {
+                event: {
+                    id: {
+                        equals: id ? id.toString() : "",
+                    },
+                },
+            },
+        },
+        {
+            cacheTime: 5,
+            refetchInterval: rInterval,
+            enabled: id !== undefined && id != "" && accessToken !== "",
+        }
+    );
+
+    useEffect(() => {
+        if (data && data.vehicles.length > 0) {
+            const live = data.vehicles.find(
+                (element) => element.vehicleEventStatus == "live"
+            );
+            if (live) {
+                setLiveItem(live);
+            } else {
+                setLiveItem(null);
+            }
+        } else {
+            setLiveItem(null);
+        }
+    }, [data]);
+
+    const callCreateBid = useCreateBidMutation<CreateBidMutationVariables>(
+        graphQLClient({ Authorization: `Bearer ${accessToken}` })
+    );
+
+    async function CallBid(amount, vehicleId) {
+        const confirmed = confirm(`Are you sure to bid for\nRs. ${amount}`);
+        if (confirmed) {
+            callCreateBid
+                .mutateAsync({
+                    data: {
+                        amount: parseInt(amount),
+                        bidVehicle: {
+                            connect: {
+                                id: vehicleId,
+                            },
+                        },
+                    },
+                })
+                .then(() => {
+                    alert("Your bid has been submitted");
+                })
+                .catch((error) => {
+                   // alert(error.message);
+                });
+        }
+    }
+
+    function SecondsLeft() {
+        // expiry - server + tick
+        try {
+            if (liveItem) {
+                const expiryTime = moment(liveItem.bidTimeExpire);
+                const currentTime = moment(serverTime).add(tick, "seconds");
+                const diff = expiryTime.diff(currentTime, "seconds");
+                if (diff > 0) return moment.utc(diff * 1000).format("HH:mm:ss");
+                else return "-";
+            }
+            return "";
+        } catch {
+            return "";
+        }
+    }
+
+    return (
+        <DashboardTemplate heading="Open Auctions">
+            <div>
+                <div className="bg-white">
+                    {liveItem ? (
+                        <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:max-w-7xl lg:px-8">
+                            <div className="relative">
+                                <h2 className="text-center text-2xl leading-8 font-extrabold tracking-tight text-gray-900 sm:text-3xl">
+                                    Next Vehicle In
+                                </h2>
+                                <p className="mt-4 text-center text-3xl leading-8 font-extrabold tracking-tight text-gray-900 sm:text-4xl">
+                                    {SecondsLeft()}
+                                </p>
+                            </div>
+
+                            <div className="lg:grid lg:grid-cols-2 lg:gap-x-8 lg:items-start mt-8 pt-8 border-t border-gray-200">
+                                <Tab.Group
+                                    as="div"
+                                    className="flex flex-col max-w-2xl justify-between"
+                                >
+                                    <div className="w-full max-w-3xl mx-auto sm:block">
+                                        <Tab.Panels className="w-full aspect-w-1 aspect-h-1">
+                                            {liveItem.frontImage && (
+                                                <Tab.Panel key="i1">
+                                                    <Image
+                                                        src={liveItem.frontImage}
+                                                        alt="i1"
+                                                        className="w-full h-full object-center object-cover sm:rounded-lg"
+                                                        width={500}
+                                                        height={300}
+                                                    />
+                                                </Tab.Panel>
+                                            )}
+                                            {liveItem.backImage && (
+                                                <Tab.Panel key="i2">
+                                                    <Image
+                                                        src={liveItem.backImage}
+                                                        alt="i2"
+                                                        className="w-full h-full object-center object-cover sm:rounded-lg"
+                                                        width={500}
+                                                        height={300}
+                                                    />
+                                                </Tab.Panel>
+                                            )}
+                                            {liveItem.leftImage && (
+                                                <Tab.Panel key="i3">
+                                                    <Image
+                                                        src={liveItem.leftImage}
+                                                        alt="i3"
+                                                        className="w-full h-full object-center object-cover sm:rounded-lg"
+                                                        width={500}
+                                                        height={300}
+                                                    />
+                                                </Tab.Panel>
+                                            )}
+                                            {liveItem.rightImage && (
+                                                <Tab.Panel key="i4">
+                                                    <Image
+                                                        src={liveItem.rightImage}
+                                                        alt="i4"
+                                                        className="w-full h-full object-center object-cover sm:rounded-lg"
+                                                        width={500}
+                                                        height={300}
+                                                    />
+                                                </Tab.Panel>
+                                            )}
+                                        </Tab.Panels>
+                                    </div>
+
+                                    <div className="hidden mt-6 w-full max-w-2xl mx-auto sm:block lg:max-w-none">
+                                        <Tab.List className="grid grid-cols-4 gap-6">
+                                            {liveItem.frontImage && (
+                                                <Tab
+                                                    key="it1"
+                                                    className="relative h-24 bg-white rounded-md flex items-center justify-center text-sm font-medium uppercase text-gray-900 cursor-pointer hover:bg-gray-50 focus:outline-none focus:ring focus:ring-offset-4 focus:ring-opacity-50"
+                                                >
+                                                    {({ selected }) => (
+                                                        <>
+                                                            <span className="absolute inset-0 rounded-md overflow-hidden">
+                                                                <Image
+                                                                    src={liveItem.frontImage}
+                                                                    alt="altii1"
+                                                                    className="w-full h-full object-center object-cover"
+                                                                    width={100}
+                                                                    height={100}
+                                                                />
+                                                            </span>
+                                                            <span
+                                                                className={classNames(
+                                                                    selected
+                                                                        ? "ring-indigo-500"
+                                                                        : "ring-transparent",
+                                                                    "absolute inset-0 rounded-md ring-2 ring-offset-2 pointer-events-none"
+                                                                )}
+                                                                aria-hidden="true"
+                                                            />
+                                                        </>
+                                                    )}
+                                                </Tab>
+                                            )}
+                                            {liveItem.backImage && (
+                                                <Tab
+                                                    key="it2"
+                                                    className="relative h-24 bg-white rounded-md flex items-center justify-center text-sm font-medium uppercase text-gray-900 cursor-pointer hover:bg-gray-50 focus:outline-none focus:ring focus:ring-offset-4 focus:ring-opacity-50"
+                                                >
+                                                    {({ selected }) => (
+                                                        <>
+                                                            <span className="absolute inset-0 rounded-md overflow-hidden">
+                                                                <Image
+                                                                    src={liveItem.backImage}
+                                                                    alt="altii2"
+                                                                    className="w-full h-full object-center object-cover"
+                                                                    width={100}
+                                                                    height={100}
+                                                                />
+                                                            </span>
+                                                            <span
+                                                                className={classNames(
+                                                                    selected
+                                                                        ? "ring-indigo-500"
+                                                                        : "ring-transparent",
+                                                                    "absolute inset-0 rounded-md ring-2 ring-offset-2 pointer-events-none"
+                                                                )}
+                                                                aria-hidden="true"
+                                                            />
+                                                        </>
+                                                    )}
+                                                </Tab>
+                                            )}
+                                            {liveItem.leftImage && (
+                                                <Tab
+                                                    key="it3"
+                                                    className="relative h-24 bg-white rounded-md flex items-center justify-center text-sm font-medium uppercase text-gray-900 cursor-pointer hover:bg-gray-50 focus:outline-none focus:ring focus:ring-offset-4 focus:ring-opacity-50"
+                                                >
+                                                    {({ selected }) => (
+                                                        <>
+                                                            <span className="absolute inset-0 rounded-md overflow-hidden">
+                                                                <Image
+                                                                    src={liveItem.leftImage}
+                                                                    alt="altii3"
+                                                                    className="w-full h-full object-center object-cover"
+                                                                    width={100}
+                                                                    height={100}
+                                                                />
+                                                            </span>
+                                                            <span
+                                                                className={classNames(
+                                                                    selected
+                                                                        ? "ring-indigo-500"
+                                                                        : "ring-transparent",
+                                                                    "absolute inset-0 rounded-md ring-2 ring-offset-2 pointer-events-none"
+                                                                )}
+                                                                aria-hidden="true"
+                                                            />
+                                                        </>
+                                                    )}
+                                                </Tab>
+                                            )}
+                                            {liveItem.rightImage && (
+                                                <Tab
+                                                    key="it4"
+                                                    className="relative h-24 bg-white rounded-md flex items-center justify-center text-sm font-medium uppercase text-gray-900 cursor-pointer hover:bg-gray-50 focus:outline-none focus:ring focus:ring-offset-4 focus:ring-opacity-50"
+                                                >
+                                                    {({ selected }) => (
+                                                        <>
+                                                            <span className="absolute inset-0 rounded-md overflow-hidden">
+                                                                <Image
+                                                                    src={liveItem.rightImage}
+                                                                    alt="altii4"
+                                                                    className="w-full h-full object-center object-cover"
+                                                                    width={100}
+                                                                    height={100}
+                                                                />
+                                                            </span>
+                                                            <span
+                                                                className={classNames(
+                                                                    selected
+                                                                        ? "ring-indigo-500"
+                                                                        : "ring-transparent",
+                                                                    "absolute inset-0 rounded-md ring-2 ring-offset-2 pointer-events-none"
+                                                                )}
+                                                                aria-hidden="true"
+                                                            />
+                                                        </>
+                                                    )}
+                                                </Tab>
+                                            )}
+                                        </Tab.List>
+                                    </div>
+                                </Tab.Group>
+
+                                <div className="mt-10 px-4 sm:px-0 sm:mt-16 lg:mt-0">
+                                    <dd className="font-medium text-gray-900">
+                                        ID #{liveItem.vehicleIndexNo}
+                                    </dd>
+                                    <h1 className="text-3xl font-lightbold tracking-tight text-gray-900 mt-4">
+                                        Vehicle Details
+                                    </h1>
+
+                                    <div className="mt-4 divide-y divide-gray-200 text-sm rounded pt-2">
+                                        <div className="space-y-1">
+                                            <div
+                                                key="d1"
+                                                className="pb-4 flex items-center justify-start"
+                                            >
+                                                <dt className="flex items-center text-sm text-gray-500 w-40">
+                                                    <CubeIcon
+                                                        className="flex-shrink-0 mr-1.5 h-5 w-5 text-gray-400"
+                                                        aria-hidden="true"
+                                                    />
+                                                    {"Category"}
+                                                </dt>
+                                                <dd className="font-medium text-gray-900">
+                                                    {liveItem.categoty}
+                                                </dd>
+                                            </div>
+                                            <div
+                                                key="d2"
+                                                className="pb-4 flex items-center justify-start"
+                                            >
+                                                <dt className="flex items-center text-sm text-gray-500 w-40">
+                                                    <CubeIcon
+                                                        className="flex-shrink-0 mr-1.5 h-5 w-5 text-gray-400"
+                                                        aria-hidden="true"
+                                                    />
+                                                    {"Reg No."}
+                                                </dt>
+                                                <dd className="font-medium text-gray-900">
+                                                    {liveItem.registrationNumber}
+                                                </dd>
+                                            </div>
+                                            <div
+                                                key="d2"
+                                                className="pb-4 flex items-center justify-start"
+                                            >
+                                                <dt className="flex items-center text-sm text-gray-500 w-40">
+                                                    <CubeIcon
+                                                        className="flex-shrink-0 mr-1.5 h-5 w-5 text-gray-400"
+                                                        aria-hidden="true"
+                                                    />
+                                                    {"Make"}
+                                                </dt>
+                                                <dd className="font-medium text-gray-900">
+                                                    {liveItem.make}
+                                                </dd>
+                                            </div>
+                                            <div
+                                                key="d3"
+                                                className="pb-4 flex items-center justify-start"
+                                            >
+                                                <dt className="flex items-center text-sm text-gray-500 w-40">
+                                                    <CubeIcon
+                                                        className="flex-shrink-0 mr-1.5 h-5 w-5 text-gray-400"
+                                                        aria-hidden="true"
+                                                    />
+                                                    {"Model"}
+                                                </dt>
+                                                <dd className="font-medium text-gray-900">
+                                                    {liveItem.model}
+                                                </dd>
+                                            </div>
+                                            <div
+                                                key="d4"
+                                                className="pb-4 flex items-center justify-start"
+                                            >
+                                                <dt className="flex items-center text-sm text-gray-500 w-40">
+                                                    <CubeIcon
+                                                        className="flex-shrink-0 mr-1.5 h-5 w-5 text-gray-400"
+                                                        aria-hidden="true"
+                                                    />
+                                                    {"Year of Manufacture"}
+                                                </dt>
+                                                <dd className="font-medium text-gray-900">
+                                                    {liveItem.yearOfManufacture}
+                                                </dd>
+                                            </div>
+                                            <div
+                                                key="d5"
+                                                className="pb-4 flex items-center justify-start"
+                                            >
+                                                <dt className="flex items-center text-sm text-gray-500 w-40">
+                                                    <CubeIcon
+                                                        className="flex-shrink-0 mr-1.5 h-5 w-5 text-gray-400"
+                                                        aria-hidden="true"
+                                                    />
+                                                    {"Km(s)"}
+                                                </dt>
+                                                <dd className="font-medium text-gray-900">
+                                                    {liveItem.kmReading}
+                                                </dd>
+                                            </div>
+                                            <div
+                                                key="d5"
+                                                className="pb-4 flex items-center justify-start"
+                                            >
+                                                <dt className="flex items-center text-sm text-gray-500 w-40">
+                                                    <CubeIcon
+                                                        className="flex-shrink-0 mr-1.5 h-5 w-5 text-gray-400"
+                                                        aria-hidden="true"
+                                                    />
+                                                    {"Start Price"}
+                                                </dt>
+                                                <dd className="font-medium text-gray-900">
+                                                    {liveItem.startPrice}
+                                                </dd>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-8">
+                                        <h2 className="text-sm">Current Bid Amount</h2>
+                                        <p className="text-3xl text-gray-900">
+                                            {liveItem.currentBidAmount}
+                                        </p>
+                                    </div>
+
+                                    <div className="mt-8">
+                                        <h2 className="text-sm">Rank</h2>
+                                        <p className="text-3xl text-gray-900">
+                                            {liveItem.myBidRank}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mt-8 pb-8 border-t border-b border-gray-200">
+                                <div className="flex-none  py-4 text-sm">
+                                    Quick Bid - Increment by
+                                </div>
+                                <div className="grid gap-y-4 grid-cols-1 lg:grid-cols-2 lg:gap-x-8 lg:items-start">
+                                    <div className="flex flex-wrap gap-2">
+                                        {incrementAmounts.map((increment, index) => (
+                                            <button
+                                                key={index}
+                                                type="button"
+                                                onClick={() => {
+                                                    setBidAmount(
+                                                        liveItem.currentBidAmount + increment.value
+                                                    );
+                                                }}
+                                                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200 focus:outline-none"
+                                            >
+                                                {increment.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="sm:flex">
+                                        <input
+                                            name="text"
+                                            type="text"
+                                            value={bidAmount}
+                                            onChange={(e) => {
+                                                setBidAmount(e.target.value.replace(/\D/g, ""));
+                                            }}
+                                            className="w-full px-5 py-3 placeholder-gray-500 focus:ring-indigo-500 focus:border-indigo-500 sm:max-w-xs border-gray-300 rounded-md"
+                                            placeholder="Enter Bid Amount"
+                                        />
+                                        <div className="mt-3 rounded-md shadow sm:mt-0 sm:ml-3 sm:flex-shrink-0">
+                                            <button
+                                                type="submit"
+                                                onClick={() => {
+                                                    if (parseInt(bidAmount) % 100 != 0) {
+                                                        alert("Bid amount should be multiple of 100");
+                                                    } else if (liveItem.currentBidAmount >= bidAmount) {
+                                                        alert("Bid amount should be greater than last bid");
+                                                    } else {
+                                                        CallBid(bidAmount, liveItem.id);
+                                                    }
+                                                }}
+                                                className="w-full flex items-center justify-center px-5 py-3 border border-transparent text-base font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                                            >
+                                                Bid Now
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:max-w-7xl lg:px-8">
+                            <div className="relative">
+                                <h2 className="text-center text-2xl leading-8 font-extrabold tracking-tight text-gray-900 sm:text-3xl">
+                                    No Vehicles in Live Now
+                                </h2>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </DashboardTemplate>
+    );
+}
+
+export default withPrivateRoute(OpenAuctions);
+
+import { useState } from "react";
+import { Tab, TabList, TabPanel } from "react-tabs";
+import { IoIosArrowDropleftCircle, IoIosArrowDroprightCircle } from "react-icons/io";
+import { Splide, SplideSlide } from "splide-nextjs/react-splide";
+import "splide-nextjs/splide/dist/css/themes/splide-default.min.css";
+import Image from "next/image";
+
+const options = {
+  type: "loop",
+  gap: "1rem",
+  perPage: 1,
+  perMove: 1,
+  pagination: false,
+  arrows: false,
+};
+
+export default function ImageSlider({ liveItem }) {
+  const [splide, setSplide] = useState(null);
+
+  const goToPrev = () => {
+    splide.go("-1");
+  };
+
+  const goToNext = () => {
+    splide.go("+1");
+  };
+
+  return (
+    <div className="w-full max-w-3xl mx-auto sm:block">
+      <div className="flex justify-between mb-2">
+        <button onClick={goToPrev} className="p-2">
+          <IoIosArrowDropleftCircle size={36} />
+        </button>
+        <button onClick={goToNext} className="p-2">
+          <IoIosArrowDroprightCircle size={36} />
+        </button>
+      </div>
+
+      <TabList className="flex justify-center gap-2">
+        {liveItem.frontImage && <Tab>i1</Tab>}
+        {liveItem.backImage && <Tab>i2</Tab>}
+        {liveItem.leftImage && <Tab>i3</Tab>}
+        {liveItem.rightImage && <Tab>i4</Tab>}
+      </TabList>
+
+      <Tab.Panels className="w-full aspect-w-1 aspect-h-1">
+        <Splide options={options} onSplideCreated={setSplide}>
+          {liveItem.frontImage && (
+            <SplideSlide>
+              <Tab.Panel key="i1">
+                <Image
+                  src={liveItem.frontImage}
+                  alt="i1"
+                  className="w-full h-full object-center object-cover sm:rounded-lg"
+                  width={500}
+                  height={300}
+                />
+              </Tab.Panel>
+            </SplideSlide>
+          )}
+
+          {liveItem.backImage && (
+            <SplideSlide>
+              <Tab.Panel key="i2">
+                <Image
+                  src={liveItem.backImage}
+                  alt="i2"
+                  className="w-full h-full object-center object-cover sm:rounded-lg"
+                  width={500}
+                  height={300}
+                />
+              </Tab.Panel>
+            </SplideSlide>
+          )}
+
+          {liveItem.leftImage && (
+            <SplideSlide>
+              <Tab.Panel key="i3">
+                <Image
+                  src={liveItem.leftImage}
+                  alt="i3"
+                  className="w-full h-full object-center object-cover sm:rounded-lg"
+                  width={500}
+                  height={300}
+                />
+              </Tab.Panel>
+            </SplideSlide>
+          )}
+
+          {liveItem.rightImage && (
+            <SplideSlide>
+              <Tab.Panel key="i4">
+                <Image
+                  src={liveItem.rightImage}
+                  alt="i4"
+                  className="w-full h-full object-center object-cover sm:rounded-lg"
+                  width={500}
+                  height={300}
+                />
+              </Tab.Panel>
+            </SplideSlide>
+          )}
+        </Splide
+
+
+
+liveItem.currentBidAmount 

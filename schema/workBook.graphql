@@ -1,0 +1,16 @@
+mutation addWorkBook($data: WorkSheetCreateInput!) {
+  createWorkSheet(data: $data){
+id
+}
+}
+
+query userWorkSheets {
+  workSheets {
+    id
+    registrationNumber
+    model
+    make
+    engineNo
+    chassis
+  }
+}
